@@ -13,6 +13,15 @@ const createDbTable = require("./createDBTable.js");
 //
 createDbTable();
 
+const limiter = rateLimit({
+  //we are limited 10 request from one IP in 1hr
+  max: 10,
+  windowMs: 60 * 60 * 1000,
+  //message if limit cross
+  message: "To many request from this IP, please try again after an hour!",
+});
+//applying limiter middleware for all request coming from /api
+app.use("/api", limiter);
 //routing
 app.use("/api/v1/users", userRouter);
 app.use("/api/v1/userRoles", userRoleRouter);
