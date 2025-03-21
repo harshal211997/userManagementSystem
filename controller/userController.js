@@ -137,7 +137,9 @@ exports.listUsers = async (req, res, next) => {
     limit = parseInt(limit) || 10;
     let offset = (page - 1) * limit;
     //
-    let query = `Select 
+    let query = `
+    with cte as
+    (Select 
                     u.userid,
                     u.first_name,
                     u.last_name,
@@ -145,39 +147,43 @@ exports.listUsers = async (req, res, next) => {
                     u.phone_number,
                     r.role_name
                   from users u
-                  inner join userrole r
-                  on u.role_id = r.id`;
+                  left join userrole r
+                  on u.role_id = r.id)
+  Select first_name,last_name,email,phone_number as phone,role_name as role from cte
+  where 1=1
+                  `;
     let values = [];
     let count = 1;
     if (first_name) {
-      query += ` AND u.first_name ILIKE $${count}`;
+      query += ` AND cte.first_name ILIKE $${count}`;
       values.push(`%${first_name}%`);
       count++;
     }
     if (last_name) {
-      query += ` AND u.last_name ILIKE $${count}`;
+      query += ` AND cte.last_name ILIKE $${count}`;
       values.push(`%${last_name}%`);
       count++;
     }
     if (email) {
-      query += ` AND u.email ILIKE $${count}`;
+      query += ` AND cte.email ILIKE $${count}`;
       values.push(`%${email}%`);
       count++;
     }
     if (phone_number) {
-      query += ` AND u.phone_number ILIKE $${count}`;
+      query += ` AND cte.phone_number ILIKE $${count}`;
       values.push(`%${phone_number}%`);
       count++;
     }
     if (role_name) {
-      query += ` AND r.role_name ILIKE $${count}`;
+      query += ` AND cte.role_name ILIKE $${count}`;
       values.push(`%${role_name}%`);
       count++;
     }
-    query += ` order by u.userid desc limit $${count} offset $${count + 1}`;
+    query += ` order by cte.userid desc limit $${count} offset $${count + 1}`;
     values.push(limit, offset);
     //
     const users = await dbPool.query(query, values);
+
     res.status(200).json({
       status: "Success",
       total: users.rows.length,
