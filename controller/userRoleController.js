@@ -1,21 +1,11 @@
 const dbPool = require("../dbConnection.js");
-
+const userRoleValidatorSchema = require("../validator/userRoleValidator.js");
 //Create Role:
 exports.createUserRole = async (req, res, next) => {
   const { role_name } = req.body;
   try {
-    if (!role_name) {
-      return res.status(400).json({
-        status: "Fail",
-        message: "Please provide role",
-      });
-    }
-    if (role_name !== "Admin" && role_name !== "User") {
-      return res.status(404).json({
-        status: "Fail",
-        message: "Invalid role, please enter valid role",
-      });
-    }
+    await userRoleValidatorSchema.validateAsync(req.body);
+
     const result = await dbPool.query(
       "insert into userRole (role_name) values ($1) returning *",
       [role_name]
@@ -27,7 +17,7 @@ exports.createUserRole = async (req, res, next) => {
       },
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(400).json({
       status: "Fail",
       message: error.message,
     });
