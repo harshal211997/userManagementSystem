@@ -1,6 +1,7 @@
 const dbPool = require("../dbConnection.js");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const userSchemaValidator = require("../validator/userValidator.js");
 
 const singnToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -12,12 +13,8 @@ const singnToken = (id) => {
 exports.register = async (req, res, next) => {
   const { first_name, last_name, password, email, phone_number } = req.body;
   try {
-    if (!first_name || !last_name || !email || !phone_number || !password) {
-      return res.status(400).json({
-        status: "Fail",
-        message: "Please provide all fields",
-      });
-    }
+    //Validating user data:
+    await userSchemaValidator.validateAsync(req.body);
     const userExists = await dbPool.query(
       "Select * from users where email = $1",
       [email]
@@ -42,9 +39,9 @@ exports.register = async (req, res, next) => {
       },
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(400).json({
       status: "Fail",
-      message: error.message,
+      message: error.details[0].message,
     });
   }
 };
