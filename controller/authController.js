@@ -137,6 +137,19 @@ exports.protect = async (req, res, next) => {
           message: "The user belong to this token no longer exists.",
         });
       }
+      const tokenIssuedAt = decode.iat;
+      const passwordChangedAt = freshUser.rows[0].passwordchangedat;
+      if (passwordChangedAt) {
+        const passwordChangedTimeStamp = Math.floor(
+          new Date(passwordChangedAt).getTime() / 1000
+        );
+        if (tokenIssuedAt < passwordChangedTimeStamp) {
+          return res.status(401).json({
+            status: "Fail",
+            message: "Password Changed. Please login again",
+          });
+        }
+      }
       req.user = freshUser.rows[0];
       next();
     });
