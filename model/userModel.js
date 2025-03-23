@@ -9,7 +9,8 @@ const createUserTable = async () => {
     password TEXT NOT NULL,
     email VARCHAR(1000) UNIQUE NOT NULL,
     phone_number varchar(15) UNIQUE NOT NULL,
-    role_id INT REFERENCES userRole(id) 
+    role_id INT REFERENCES userRole(id),
+    passwordChangedAt TIMESTAMP DEFAULT NULL
   )
   `;
   let query1 = `

@@ -10,7 +10,7 @@ router.post("/login", authController.login);
 //protect route:
 router.use(authController.protect);
 //
-
+router.post("/updatePassword", authController.updatePassword);
 router.put(
   "/:userId/assignRole",
   authController.restrictTo("Admin"),

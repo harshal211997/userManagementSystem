@@ -63,7 +63,7 @@ exports.login = async (req, res, next) => {
     if (userExists.rows.length === 0) {
       return res.status(400).json({
         status: "Fail",
-        message: "Invalid Credentials",
+        message: "The user does not exist. Please register.",
       });
     }
     const verifyPassword = await bcrypt.compare(
@@ -172,4 +172,54 @@ exports.restrictTo = (...roles) => {
     }
     next();
   };
+};
+//Update user password:
+exports.updatePassword = async (req, res, next) => {
+  const { oldPassword, newPassword, confirmPassword } = req.body;
+  try {
+    if (!oldPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({
+        status: "Fail",
+        message: "All Fields are required",
+      });
+    }
+    //will get user by user data sent from protect route
+    const result = await dbPool.query("Select * from users where userid = $1", [
+      req.user.userid,
+    ]);
+    let user = result.rows[0];
+    //Now will verify newPassword and confirmPassword:
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({
+        status: "Fail",
+        message: "Password do not match",
+      });
+    }
+    //Will compare userentered old password is correct
+    const verifyPassword = await bcrypt.compare(oldPassword, user.password);
+    if (!verifyPassword) {
+      return res.status(400).json({
+        status: "Fail",
+        message:
+          "You Entered wrong old password, please provide correct old password!",
+      });
+    }
+    //decrypt new password:
+    const hashPassword = await bcrypt.hash(confirmPassword, 12);
+    const passwordChangedAt = new Date();
+    //if old password is correct
+    await dbPool.query(
+      "update users set password = $1,  passwordChangedAt = $2 where userid = $3",
+      [hashPassword, passwordChangedAt, req.user.userid]
+    );
+    res.status(200).json({
+      status: "Success",
+      message: "Password updated successfully",
+    });
+  } catch (error) {
+    res.status(400).json({
+      status: "Fail",
+      message: error.message,
+    });
+  }
 };
