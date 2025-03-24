@@ -12,7 +12,9 @@ const createUserTable = async () => {
     role_id INT REFERENCES userRole(id),
     passwordChangedAt TIMESTAMP DEFAULT NULL,
     failedAttempts INT DEFAULT 0,
-    lastAttempte BIGINT DEFAULT NULL
+    lastAttempte BIGINT DEFAULT NULL,
+    passwordResetToken TEXT DEFAULT NULL,
+    passwordResetExpire BIGINT DEFAULT 0
   )
   `;
   let query1 = `

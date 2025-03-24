@@ -1,7 +1,9 @@
 const dbPool = require("../dbConnection.js");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const crypto = require("crypto");
 const userSchemaValidator = require("../validator/userValidator.js");
+const sendEmail = require("../utils/email.js");
 
 const singnToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -256,6 +258,110 @@ exports.updatePassword = async (req, res, next) => {
     res.status(200).json({
       status: "Success",
       message: "Password updated successfully",
+    });
+  } catch (error) {
+    res.status(400).json({
+      status: "Fail",
+      message: error.message,
+    });
+  }
+};
+//Forgot password:
+exports.forgotPassword = async (req, res, next) => {
+  const { email } = req.body;
+  try {
+    //Get user based on email:
+    const result = await dbPool.query("Select * from users where email = $1", [
+      email,
+    ]);
+    if (result.rows[0].length === 0) {
+      return res.status(404).json({
+        status: "Fail",
+        message: "User not found",
+      });
+    }
+    const user = result.rows[0];
+    //Will genrate random password reset token and save in DB
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    const hashResetToken = crypto
+      .createHash("sha256")
+      .update(resetToken)
+      .digest("hex");
+    //Will give 10min of time to reset user password:
+    const passwordResetTime = Date.now() + 10 * 60 * 1000;
+    //Will save this in DB:
+    await dbPool.query(
+      "Update users set passwordresettoken = $1, passwordresetexpire = $2 where email = $3",
+      [hashResetToken, passwordResetTime, user.email]
+    );
+    //Will send email to reset password:
+    const protocol = req.protocol;
+    const host = req.get("host");
+    const passwordResetURL = `${protocol}://${host}/api/v1/users/resetPassword/${hashResetToken}`;
+    const message = `Click here to forgot password :${passwordResetURL}\n If you don't want to forgot your password, please ignore this email!`;
+    //send password reset email:
+    await sendEmail({
+      email: user.email,
+      subject: "Reset Your Password - Action Required (Valid till 10min)",
+      url: passwordResetURL,
+      name: user.first_name,
+    });
+    res.status(200).json({
+      status: "Success",
+      message: "Please check your email to reset password",
+    });
+  } catch (error) {
+    //If anywhere fail will set token and time default in DB
+    await dbPool.query(
+      "Update users set passwordresettoken = $1, passwordresetexpire = $2 where email = $3",
+      [null, 0, email]
+    );
+    res.status(400).json({
+      status: "Fail",
+      message: error.message,
+    });
+  }
+};
+
+//Reset Password:
+exports.resetPassword = async (req, res, next) => {
+  const { token } = req.params;
+  const { newPassword, confirmPassword } = req.body;
+  try {
+    //Will get user from DB for valid time of 10min pass reset:
+    const result = await dbPool.query(
+      "Select * from users where passwordresettoken = $1 and passwordresetexpire > $2",
+      [token, Date.now()]
+    );
+    if (result.rows.length === 0) {
+      return res.status(400).json({
+        status: "Fail",
+        message: "Token is invalid or Expired",
+      });
+    }
+    if (!newPassword || !confirmPassword) {
+      return res.status(400).json({
+        status: "Fail",
+        message: "All Fields are required",
+      });
+    }
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({
+        status: "Fail",
+        message: "Password do not match",
+      });
+    }
+    //decrypt new password:
+    const hashPassword = await bcrypt.hash(confirmPassword, 12);
+    const passwordChangedAt = new Date();
+    //update password
+    await dbPool.query(
+      "update users set password = $1,  passwordChangedAt = $2 ,passwordresettoken = $3, passwordresetexpire = $4 where userid = $5",
+      [hashPassword, passwordChangedAt, null, 0, result.rows[0].userid]
+    );
+    res.status(200).json({
+      status: "Success",
+      message: "Password reset successfully",
     });
   } catch (error) {
     res.status(400).json({
