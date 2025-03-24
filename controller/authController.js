@@ -53,7 +53,7 @@ exports.login = async (req, res, next) => {
     if (!email || !password) {
       return res.status(400).json({
         status: "Fail",
-        message: "Please email & password",
+        message: `Please provide email & password`,
       });
     }
     const userExists = await dbPool.query(
@@ -63,19 +63,46 @@ exports.login = async (req, res, next) => {
     if (userExists.rows.length === 0) {
       return res.status(400).json({
         status: "Fail",
-        message: "The user does not exist. Please register.",
+        message: `The user does not exist. Please register`,
       });
     }
     const verifyPassword = await bcrypt.compare(
       password,
       userExists.rows[0]["password"]
     );
-    if (!verifyPassword) {
+    const maxAttempts = 3;
+    const lockTime = 15 * 60 * 1000; // 15 min locking period
+    let { failedattempts, lastattempte } = userExists.rows[0];
+    let isLock =
+      failedattempts >= maxAttempts && Date.now() - lastattempte < lockTime;
+    if (isLock) {
       return res.status(400).json({
         status: "Fail",
-        message: "Invalid Credentials",
+        message:
+          "Your account is locked due to multiple failed login attempts. Try again after 15 minutes.",
       });
     }
+    if (!verifyPassword) {
+      const newFailedAttempt = failedattempts + 1;
+      await dbPool.query(
+        "Update users set failedattempts = $1, lastattempte = $2 where email = $3",
+        [newFailedAttempt, Date.now(), email]
+      );
+      return res.status(400).json({
+        status: "Fail",
+        message: `Invalid Credentials. Attempts left: ${Math.max(
+          0,
+          maxAttempts - newFailedAttempt
+        )}`,
+      });
+    }
+    //Validating user login try:
+    //set failedAttempts
+    await dbPool.query(
+      "Update users set failedAttempts = 0, lastAttempte = 0 where email = $1",
+      [email]
+    );
+
     //JWT Token:
     const token = singnToken(userExists["rows"][0]["userid"]);
     // const cookieOptions = {
@@ -84,6 +111,7 @@ exports.login = async (req, res, next) => {
     //   ),
     // };
     // res.cookie("jwt", token, cookieOptions);
+
     res.status(200).json({
       status: "Success",
       token,
