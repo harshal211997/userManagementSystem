@@ -1,4 +1,7 @@
 const dbPool = require("../dbConnection.js");
+const { User } = require("../model/userModel.js");
+const { UserRole } = require("../model/userRoleModel.js");
+const { Op } = require("sequelize");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
@@ -17,27 +20,29 @@ exports.register = async (req, res, next) => {
   try {
     //Validating user data:
     await userSchemaValidator.validateAsync(req.body);
-    const userExists = await dbPool.query(
-      "Select * from users where email = $1",
-      [email]
-    );
-    if (userExists.rows.length > 0) {
+    const userExists = await User.findOne({
+      where: { email },
+    });
+    if (userExists) {
       return res.status(409).json({
         status: "Fail",
         message: "User Alreday exists",
       });
     }
     const hashPassword = await bcrypt.hash(password, 12);
-    const result = await dbPool.query(
-      "insert into users (first_name, last_name, password, email, phone_number ) values ($1, $2, $3, $4, $5) returning *",
-      [first_name, last_name, hashPassword, email, phone_number]
-    );
+    const newUser = await User.create({
+      first_name,
+      last_name,
+      password: hashPassword,
+      email,
+      phone_number,
+    });
     res.status(201).json({
-      status: "Success",
-      data: {
-        userid: result["rows"][0]["userid"],
-        first_name: result["rows"][0]["first_name"],
-        last_name: result["rows"][0]["last_name"],
+      status: "User registred successfully",
+      user: {
+        id: newUser.id,
+        first_name: newUser.first_name,
+        last_name: newUser.last_name,
       },
     });
   } catch (error) {
@@ -58,11 +63,10 @@ exports.login = async (req, res, next) => {
         message: `Please provide email & password`,
       });
     }
-    const userExists = await dbPool.query(
-      "Select * from users where email = $1",
-      [email]
-    );
-    if (userExists.rows.length === 0) {
+    const userExists = await User.findOne({
+      where: { email },
+    });
+    if (!userExists) {
       return res.status(400).json({
         status: "Fail",
         message: `The user does not exist. Please register`,
@@ -70,11 +74,12 @@ exports.login = async (req, res, next) => {
     }
     const verifyPassword = await bcrypt.compare(
       password,
-      userExists.rows[0]["password"]
+      userExists.dataValues.password
     );
     const maxAttempts = 3;
     const lockTime = 15 * 60 * 1000; // 15 min locking period
-    let { failedattempts, lastattempte } = userExists.rows[0];
+    let { failedAttempts: failedattempts, lastAttempte: lastattempte } =
+      userExists.dataValues;
     let isLock =
       failedattempts >= maxAttempts && Date.now() - lastattempte < lockTime;
     if (isLock) {
@@ -86,13 +91,18 @@ exports.login = async (req, res, next) => {
     }
     if (!verifyPassword) {
       const newFailedAttempt = failedattempts + 1;
-      await dbPool.query(
-        "Update users set failedattempts = $1, lastattempte = $2 where email = $3",
-        [newFailedAttempt, Date.now(), email]
+      await User.update(
+        {
+          failedAttempts: newFailedAttempt,
+          lastAttempte: Date.now(),
+        },
+        {
+          where: { email },
+        }
       );
       return res.status(400).json({
         status: "Fail",
-        message: `Invalid Credentials. Attempts left: ${Math.max(
+        message: `Invalid email/username or password. Attempts left: ${Math.max(
           0,
           maxAttempts - newFailedAttempt
         )}`,
@@ -100,13 +110,17 @@ exports.login = async (req, res, next) => {
     }
     //Validating user login try:
     //set failedAttempts
-    await dbPool.query(
-      "Update users set failedAttempts = 0, lastAttempte = 0 where email = $1",
-      [email]
+    await User.update(
+      {
+        failedAttempts: 0,
+        lastAttempte: 0,
+      },
+      {
+        where: { email },
+      }
     );
-
     //JWT Token:
-    const token = singnToken(userExists["rows"][0]["userid"]);
+    const token = singnToken(userExists.dataValues.userId);
     // const cookieOptions = {
     //   expires: new Date(
     //     Date.now() + process.env.JWT_EXPIRE_IN_COOKIE * 60 * 60 * 1000
@@ -157,18 +171,18 @@ exports.protect = async (req, res, next) => {
           message: "Invalid Token",
         });
       }
-      const freshUser = await dbPool.query(
-        "Select * from users where userid = $1",
-        [decode.id]
-      );
-      if (freshUser.rows.length === 0) {
+      const freshUser = await User.findOne({
+        where: { userId: decode.id },
+      });
+
+      if (!freshUser) {
         return res.status(401).json({
           status: "Fail",
           message: "The user belong to this token no longer exists.",
         });
       }
       const tokenIssuedAt = decode.iat;
-      const passwordChangedAt = freshUser.rows[0].passwordchangedat;
+      const passwordChangedAt = freshUser.dataValues.passwordChangedAt;
       if (passwordChangedAt) {
         const passwordChangedTimeStamp = Math.floor(
           new Date(passwordChangedAt).getTime() / 1000
@@ -180,7 +194,7 @@ exports.protect = async (req, res, next) => {
           });
         }
       }
-      req.user = freshUser.rows[0];
+      req.user = freshUser.dataValues;
       next();
     });
   } catch (error) {
@@ -194,13 +208,13 @@ exports.protect = async (req, res, next) => {
 //Restrict route
 exports.restrictTo = (...roles) => {
   return async (req, res, next) => {
-    const result = await dbPool.query(
-      "Select role_name from userRole where id = $1",
-      [req.user.role_id]
-    );
+    const role = await UserRole.findOne({
+      where: { id: req.user.role_id },
+      attributes: ["role_name"],
+    });
 
-    if (result.rows.length > 0) {
-      const role_name = result.rows[0]["role_name"];
+    if (role) {
+      const { role_name } = role.dataValues;
       if (!roles.includes(role_name)) {
         return res.status(403).json({
           status: "Fail",
@@ -227,10 +241,10 @@ exports.updatePassword = async (req, res, next) => {
       });
     }
     //will get user by user data sent from protect route
-    const result = await dbPool.query("Select * from users where userid = $1", [
-      req.user.userid,
-    ]);
-    let user = result.rows[0];
+    const user = await User.findOne({
+      where: { userId: req.user.userId },
+    });
+
     //Now will verify newPassword and confirmPassword:
     if (newPassword !== confirmPassword) {
       return res.status(400).json({
@@ -251,9 +265,14 @@ exports.updatePassword = async (req, res, next) => {
     const hashPassword = await bcrypt.hash(confirmPassword, 12);
     const passwordChangedAt = new Date();
     //if old password is correct
-    await dbPool.query(
-      "update users set password = $1,  passwordChangedAt = $2 where userid = $3",
-      [hashPassword, passwordChangedAt, req.user.userid]
+    await User.update(
+      {
+        password: hashPassword,
+        passwordChangedAt,
+      },
+      {
+        where: { userId: req.user.userId },
+      }
     );
     res.status(200).json({
       status: "Success",
@@ -271,16 +290,17 @@ exports.forgotPassword = async (req, res, next) => {
   const { email } = req.body;
   try {
     //Get user based on email:
-    const result = await dbPool.query("Select * from users where email = $1", [
-      email,
-    ]);
-    if (result.rows[0].length === 0) {
+    const userExists = await User.findOne({
+      where: { email },
+    });
+
+    if (!userExists) {
       return res.status(404).json({
         status: "Fail",
         message: "User not found",
       });
     }
-    const user = result.rows[0];
+    const user = userExists.dataValues;
     //Will genrate random password reset token and save in DB
     const resetToken = crypto.randomBytes(32).toString("hex");
     const hashResetToken = crypto
@@ -288,12 +308,18 @@ exports.forgotPassword = async (req, res, next) => {
       .update(resetToken)
       .digest("hex");
     //Will give 10min of time to reset user password:
-    const passwordResetTime = Date.now() + 10 * 60 * 1000;
+    const passwordResetTime = Date.now() + 5 * 60 * 1000;
     //Will save this in DB:
-    await dbPool.query(
-      "Update users set passwordresettoken = $1, passwordresetexpire = $2 where email = $3",
-      [hashResetToken, passwordResetTime, user.email]
+    await User.update(
+      {
+        passwordResetToken: hashResetToken,
+        passwordResetExpire: passwordResetTime,
+      },
+      {
+        where: { email: user.email },
+      }
     );
+
     //Will send email to reset password:
     const protocol = req.protocol;
     const host = req.get("host");
@@ -302,7 +328,7 @@ exports.forgotPassword = async (req, res, next) => {
     //send password reset email:
     await sendEmail({
       email: user.email,
-      subject: "Reset Your Password - Action Required (Valid till 10min)",
+      subject: "Reset Your Password - Action Required (Valid till 5 min)",
       url: passwordResetURL,
       name: user.first_name,
     });
@@ -312,9 +338,14 @@ exports.forgotPassword = async (req, res, next) => {
     });
   } catch (error) {
     //If anywhere fail will set token and time default in DB
-    await dbPool.query(
-      "Update users set passwordresettoken = $1, passwordresetexpire = $2 where email = $3",
-      [null, 0, email]
+    await User.update(
+      {
+        passwordResetToken: null,
+        passwordResetExpire: 0,
+      },
+      {
+        where: { email },
+      }
     );
     res.status(400).json({
       status: "Fail",
@@ -329,14 +360,17 @@ exports.resetPassword = async (req, res, next) => {
   const { newPassword, confirmPassword } = req.body;
   try {
     //Will get user from DB for valid time of 10min pass reset:
-    const result = await dbPool.query(
-      "Select * from users where passwordresettoken = $1 and passwordresetexpire > $2",
-      [token, Date.now()]
-    );
-    if (result.rows.length === 0) {
+    const result = await User.findOne({
+      where: {
+        passwordResetToken: token,
+        passwordResetExpire: { [Op.gt]: Date.now() },
+      },
+    });
+
+    if (!result) {
       return res.status(400).json({
         status: "Fail",
-        message: "Token is invalid or Expired",
+        message: "Invalid or expired token. Request a new reset link.",
       });
     }
     if (!newPassword || !confirmPassword) {
@@ -355,10 +389,18 @@ exports.resetPassword = async (req, res, next) => {
     const hashPassword = await bcrypt.hash(confirmPassword, 12);
     const passwordChangedAt = new Date();
     //update password
-    await dbPool.query(
-      "update users set password = $1,  passwordChangedAt = $2 ,passwordresettoken = $3, passwordresetexpire = $4 where userid = $5",
-      [hashPassword, passwordChangedAt, null, 0, result.rows[0].userid]
+    await User.update(
+      {
+        password: hashPassword,
+        passwordChangedAt: passwordChangedAt,
+        passwordResetToken: null,
+        passwordResetExpire: 0,
+      },
+      {
+        where: { userId: result.dataValues.userId },
+      }
     );
+
     res.status(200).json({
       status: "Success",
       message: "Password reset successfully",

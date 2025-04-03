@@ -18,6 +18,8 @@
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^6.10.0",
     "pg": "^8.14.1",
+    "pg-hstore": "^2.3.4",
+    "sequelize": "^6.37.7",
     "supervisor": "^0.12.0"
   },
   "devDependencies": {

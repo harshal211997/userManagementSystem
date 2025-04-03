@@ -1,27 +1,45 @@
-const dbPool = require("../dbConnection.js");
+const { Sequelize, DataTypes } = require("sequelize");
+const sequelize = require("../dbConnection.js");
 
 //Create role table:
-
-const createUserRoleTable = async () => {
-  const query = `
-    CREATE TABLE IF NOT EXISTS userRole (
-      id SERIAL PRIMARY KEY,
-      role_name VARCHAR(100) UNIQUE NOT NULL
-    )
-  `;
-  const query1 = `
-  INSERT INTO userRole (role_name) 
-  SELECT 'Admin' 
-  WHERE NOT EXISTS (SELECT 1 FROM userRole WHERE role_name = 'Admin');
-  `;
-
-  try {
-    await dbPool.query(query);
-    await dbPool.query(query1);
-    console.log("userRole Table created successfully!");
-  } catch (error) {
-    console.log("Error while creating userRole Table: ", error.message);
+const UserRole = sequelize.define(
+  "UserRole",
+  {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    role_name: {
+      type: DataTypes.STRING(500),
+      unique: true,
+      allowNull: false,
+      set(value) {
+        this.setDataValue("role_name", value.trim());
+      },
+    },
+  },
+  {
+    tableName: "userrole",
+    timestamps: false,
   }
+);
+
+//Sync table and insert one record:
+const syncUserRoleDatabase = async () => {
+  UserRole.sync()
+    .then(async () => {
+      const [role, created] = await UserRole.findOrCreate({
+        where: { role_name: "Admin" },
+        defaults: { role_name: "Admin" },
+        logging: false,
+      });
+      if (!created) {
+        console.log("userRole Admin Already exists in DB Table");
+      } else {
+        console.log("userRole Admin ensured successfully");
+      }
+      console.log("Database & tables created!");
+    })
+    .catch((error) => {
+      console.log("Error while syncing userRole table: ", error);
+    });
 };
 
-module.exports = createUserRoleTable;
+module.exports = { syncUserRoleDatabase, UserRole };

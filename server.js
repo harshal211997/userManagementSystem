@@ -9,9 +9,11 @@ dotEnv.config({ path: "./conf.env" });
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST;
 //
-const createDbTable = require("./createDBTable.js");
+const { syncUserRoleDatabase } = require("./model/userRoleModel.js");
+const { syncUserDatabase } = require("./model/userModel.js");
 //
-createDbTable();
+syncUserRoleDatabase();
+syncUserDatabase();
 
 const limiter = rateLimit({
   //we are limited 10 request from one IP in 1hr
