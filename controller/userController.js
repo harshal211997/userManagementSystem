@@ -210,7 +210,6 @@ exports.listUsers = async (req, res, next) => {
       limit: limit,
       offset: offset,
     });
-    console.log(users);
     res.status(200).json({
       status: "Success",
       total: users.length,
